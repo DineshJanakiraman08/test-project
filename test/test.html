@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Invoice Generator</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        /* Invoice Paper Styles for Screen & Print */
+        .invoice-paper {
+            background: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            margin: 0 auto;
+            color: #1e293b; /* slate-800 */
+        }
+
+        
+        
+        /* Ensure inputs blend into the form designs */
+        .form-input {
+            transition: all 0.2s;
+        }
+        .form-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+        }
+
+        /* Dark mode specific overrides */
+        .dark body {
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .dark ::-webkit-scrollbar-thumb {
+            background: #334155;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        /* Custom height for better experience in small viewports */
+        .h-screen-dynamic {
+            height: 100vh;
+        }
+        @media (max-width: 768px) {
+            .h-screen-dynamic {
+                height: auto;
+                min-height: 50vh; /* Allow for scrolling on mobile */
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- Icons Component Wrapper ---
+        const Icon = ({ name, size = 20, className = "" }) => {
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, [name]);
+            return <i data-lucide={name} width={size} height={size} className={className}></i>;
+        };
+        
+        // --- STATIC PRODUCT DATA (Simulating MySQL lookup) ---
+        const PRODUCTS = [
+            { id: 101, description: 'Web Development Services', unitPrice: 1500.00 },
+            { id: 102, description: 'Hosting Setup', unitPrice: 200.00 },
+            { id: 103, description: 'E-commerce Theme Customization', unitPrice: 750.00 },
+            { id: 104, description: 'Monthly Maintenance Fee', unitPrice: 150.00 },
+            { id: 105, description: 'Database Design & Optimization', unitPrice: 900.00 },
+            { id: 106, description: 'Logo Design Package', unitPrice: 500.00 },
+            { id: 107, description: 'Premium Support 1 Year', unitPrice: 300.00 },
+        ];
+
+        // --- Product Selector Input Component ---
+        const ProductSelectorInput = ({ item, handleItemChange, currency }) => {
+            const [searchTerm, setSearchTerm] = useState(item.description);
+            const [isSearching, setIsSearching] = useState(false);
+            const wrapperRef = useRef(null);
+
+            // Filter products based on search term
+            const filteredProducts = searchTerm.trim() === '' 
+                ? PRODUCTS 
+                : PRODUCTS.filter(product =>
+                    product.description.toLowerCase().includes(searchTerm.toLowerCase())
+                );
+
+            const handleSearchChange = (e) => {
+                const value = e.target.value;
+                setSearchTerm(value);
+                setIsSearching(true);
+                // Update description in main state
+                handleItemChange(item.id, 'description', value);
+            };
+
+            const handleSelectProduct = (product) => {
+                setSearchTerm(product.description);
+                setIsSearching(false);
+                // Update description AND auto-fill price in the main state
+                // Pass the unitPrice as the 4th argument (newPrice)
+                handleItemChange(item.id, 'description', product.description, product.unitPrice); 
+            };
+
+            // Handle clicks outside to close suggestions
+            useEffect(() => {
+                function handleClickOutside(event) {
+                    if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+                        setIsSearching(false);
+                    }
+                }
+                document.addEventListener("mousedown", handleClickOutside);
+                return () => {
+                    document.removeEventListener("mousedown", handleClickOutside);
+                };
+            }, [wrapperRef]);
+            
+            // Sync external state changes (e.g., adding a new item)
+            useEffect(() => {
+                setSearchTerm(item.description);
+            }, [item.description]);
+
+            return (
+                <div className="relative" ref={wrapperRef}>
+                    <input 
+                        type="text" 
+                        placeholder="Search or enter description" 
+                        value={searchTerm}
+                        onChange={handleSearchChange}
+                        onFocus={() => setIsSearching(true)}
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-2 text-sm dark:text-white form-input pr-8"
+                        autoComplete="off"
+                    />
+                    {/* Search Icon */}
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+                        <Icon name="search" size={16} />
+                    </span>
+
+                    {isSearching && (
+                        <div className="absolute z-10 w-full mt-1 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            {filteredProducts.length > 0 ? (
+                                filteredProducts.map(product => (
+                                    <div 
+                                        key={product.id} 
+                                        onClick={() => handleSelectProduct(product)}
+                                        className="px-3 py-2 cursor-pointer hover:bg-blue-50 dark:hover:bg-slate-600 flex justify-between items-center text-sm"
+                                    >
+                                        <span className="truncate font-medium">{product.description}</span>
+                                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                                            {currency}{product.unitPrice.toFixed(2)}
+                                        </span>
+                                    </div>
+                                ))
+                            ) : (
+                                <div className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400 italic">
+                                    No matching products.
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+
+        // --- Main Application ---
+        function App() {
+            const [darkMode, setDarkMode] = useState(false);
+            const [isGenerating, setIsGenerating] = useState(false);
+            
+            
+            // Initial State for Invoice (Updated to use products from the list)
+            const [invoice, setInvoice] = useState({
+                invoiceNumber: 'INV-001',
+                date: new Date().toISOString().split('T')[0],
+                dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                sender: {
+                    name: 'ShopFusion pvt.ltd',
+                    email: 'billing@company.com',
+                    address: '123 Business St, Tech City',
+                    phone: '+1 (555) 000-0000'
+                },
+                recipient: {
+                    name: 'Client Name',
+                    email: 'client@example.com',
+                    address: '456 Client Ave, Commerce City',
+                    phone: ''
+                },
+                paymentMethods: {
+                    bankName: 'Your Bank Name',
+                    accountNumber: '000123456789',
+                    paypalEmail: 'yourpaypal@paypal.com'
+                },
+                items: [
+                    { id: 1, description: PRODUCTS[0].description, quantity: 1, price: PRODUCTS[0].unitPrice },
+                    { id: 2, description: PRODUCTS[1].description, quantity: 1, price: PRODUCTS[1].unitPrice }
+                ],
+                taxRate: 10,
+                discountRate: 0,
+                currency: '₹'
+            });
+
+            // Toggle Dark Mode
+            useEffect(() => {
+                if (darkMode) {
+                    document.documentElement.classList.add('dark');
+                    document.body.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    document.body.classList.remove('dark');
+                }
+            }, [darkMode]);
+
+            
+
+            // Handlers
+            const handleSenderChange = (e) => setInvoice({...invoice, sender: {...invoice.sender, [e.target.name]: e.target.value}});
+            const handleRecipientChange = (e) => setInvoice({...invoice, recipient: {...invoice.recipient, [e.target.name]: e.target.value}});
+            const handlePaymentChange = (e) => setInvoice({...invoice, paymentMethods: {...invoice.paymentMethods, [e.target.name]: e.target.value}});
+            const handleMetaChange = (e) => setInvoice({...invoice, [e.target.name]: e.target.value});
+
+            // MODIFIED: Added optional newPrice parameter for auto-fill logic
+            const handleItemChange = (id, field, value, newPrice = null) => {
+                const newItems = invoice.items.map(item => {
+                    if (item.id === id) {
+                        let updates = { [field]: value };
+                        
+                        // Check for explicit price update from the ProductSelectorInput
+                        if (newPrice !== null) {
+                            updates.price = parseFloat(newPrice) || 0;
+                        }
+                        
+                        return { ...item, ...updates };
+                    }
+                    return item;
+                });
+                setInvoice({ ...invoice, items: newItems });
+            };
+
+
+            const addItem = () => {
+                const newId = invoice.items.length > 0 ? Math.max(...invoice.items.map(i => i.id)) + 1 : 1;
+                setInvoice({
+                    ...invoice,
+                    items: [...invoice.items, { id: newId, description: '', quantity: 1, price: 0 }]
+                });
+            };
+
+            const removeItem = (id) => {
+                setInvoice({
+                    ...invoice,
+                    items: invoice.items.filter(item => item.id !== id)
+                });
+            };
+
+            // Calculations
+            const subtotal = invoice.items.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+            const discountAmount = subtotal * (invoice.discountRate / 100);
+            const taxAmount = (subtotal - discountAmount) * (invoice.taxRate / 100);
+            const total = subtotal - discountAmount + taxAmount;
+
+            // PDF Generation
+            const generatePDF = () => {
+                setIsGenerating(true);
+                const element = document.getElementById('invoice-preview');
+                const opt = {
+                    margin: 0,
+                    filename: `invoice-${invoice.invoiceNumber}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true },
+                    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                };
+
+                html2pdf().set(opt).from(element).save().then(() => {
+                    setIsGenerating(false);
+                });
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row transition-colors duration-300">
+                    
+                    {/* LEFT PANEL: Editor */}
+                    <div className="w-full md:w-1/2 lg:w-5/12 p-6 overflow-y-auto bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 h-screen-dynamic">
+                        
+                        <div className="flex justify-between items-center mb-8">
+                            <h1 className="text-2xl font-bold flex items-center gap-2 dark:text-white">
+                                <span className="bg-blue-600 text-white p-2 rounded-lg">
+                                    <Icon name="file-text" size={24} />
+                                </span>
+                                Smart Invoice
+                            </h1>
+                            <button 
+                                onClick={() => setDarkMode(!darkMode)}
+                                className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-slate-600 dark:text-slate-300"
+                            >
+                                <Icon name={darkMode ? "sun" : "moon"} size={20} />
+                            </button>
+                        </div>
+
+                        <div className="space-y-8">
+                            
+                            {/* Invoice Meta */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Invoice #</label>
+                                    <input 
+                                        type="text" 
+                                        name="invoiceNumber" 
+                                        value={invoice.invoiceNumber} 
+                                        onChange={handleMetaChange}
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Currency Symbol</label>
+                                    <input 
+                                        type="text" 
+                                        name="currency" 
+                                        value={invoice.currency} 
+                                        onChange={handleMetaChange}
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Issue Date</label>
+                                    <input 
+                                        type="date" 
+                                        name="date" 
+                                        value={invoice.date} 
+                                        onChange={handleMetaChange}
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-500 dark:text-slate-400 mb-1">Due Date</label>
+                                    <input 
+                                        type="date" 
+                                        name="dueDate" 
+                                        value={invoice.dueDate} 
+                                        onChange={handleMetaChange}
+                                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <hr className="border-slate-200 dark:border-slate-800" />
+
+                            {/* People */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Sender */}
+                                <div className="space-y-3">
+                                    <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                                        <Icon name="user" size={16} className="text-blue-500"/> From (You)
+                                    </h3>
+                                    <input 
+                                        placeholder="Business Name" 
+                                        name="name" 
+                                        value={invoice.sender.name} 
+                                        onChange={handleSenderChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                    <input 
+                                        placeholder="Email" 
+                                        name="email" 
+                                        value={invoice.sender.email} 
+                                        onChange={handleSenderChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                    <input 
+                                        placeholder="Address" 
+                                        name="address" 
+                                        value={invoice.sender.address} 
+                                        onChange={handleSenderChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                    <input 
+                                        placeholder="Phone" 
+                                        name="phone" 
+                                        value={invoice.sender.phone} 
+                                        onChange={handleSenderChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                </div>
+
+                                {/* Recipient */}
+                                <div className="space-y-3">
+                                    <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                                        <Icon name="users" size={16} className="text-green-500"/> Bill To (Client)
+                                    </h3>
+                                    <input 
+                                        placeholder="Client Name" 
+                                        name="name" 
+                                        value={invoice.recipient.name} 
+                                        onChange={handleRecipientChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                    <input 
+                                        placeholder="Client Email" 
+                                        name="email" 
+                                        value={invoice.recipient.email} 
+                                        onChange={handleRecipientChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                    <input 
+                                        placeholder="Client Address" 
+                                        name="address" 
+                                        value={invoice.recipient.address} 
+                                        onChange={handleRecipientChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                    <input 
+                                        placeholder="Client Phone" 
+                                        name="phone" 
+                                        value={invoice.recipient.phone} 
+                                        onChange={handleRecipientChange}
+                                        className="w-full bg-transparent border-b border-slate-200 dark:border-slate-700 py-1 text-sm focus:border-blue-500 dark:text-slate-300 outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <hr className="border-slate-200 dark:border-slate-800" />
+
+                            {/* Items */}
+                            <div>
+                                <h3 className="font-semibold text-slate-900 dark:text-white mb-4">Line Items</h3>
+                                <div className="space-y-3">
+                                    {invoice.items.map((item, index) => (
+                                        <div key={item.id} className="flex gap-2 items-start group">
+                                            {/* 1. Product Search / Description */}
+                                            <div className="flex-[2]"> {/* Made this wider */}
+                                                <ProductSelectorInput 
+                                                    item={item} 
+                                                    handleItemChange={handleItemChange} 
+                                                    currency={invoice.currency} 
+                                                />
+                                            </div>
+
+                                            {/* 2. Quantity Input */}
+                                            <div className="w-16">
+                                                <input 
+                                                    type="number" 
+                                                    placeholder="Qty" 
+                                                    min="1"
+                                                    value={item.quantity}
+                                                    onChange={(e) => handleItemChange(item.id, 'quantity', parseInt(e.target.value) || 0)}
+                                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-2 text-sm text-center dark:text-white font-semibold"
+                                                />
+                                                <div className="text-[10px] text-center text-slate-400 mt-1">Qty</div>
+                                            </div>
+
+                                            {/* 3. Unit Price Input */}
+                                            <div className="w-20">
+                                                <input 
+                                                    type="number" 
+                                                    placeholder="Price" 
+                                                    value={item.price}
+                                                    onChange={(e) => handleItemChange(item.id, 'price', parseFloat(e.target.value) || 0)}
+                                                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-2 text-sm text-right dark:text-white"
+                                                />
+                                                <div className="text-[10px] text-right text-slate-400 mt-1">Unit Price</div>
+                                            </div>
+
+                                            {/* 4. AUTOMATIC TOTAL DISPLAY (Quantity * Unit Price) */}
+                                            <div className="w-20 py-2 text-right">
+                                                <span className="text-sm font-bold text-slate-700 dark:text-slate-200 block">
+                                                    {invoice.currency}{(item.quantity * item.price).toFixed(2)}
+                                                </span>
+                                                <div className="text-[10px] text-slate-400 mt-1">Total</div>
+                                            </div>
+                                            <button 
+                                                onClick={() => removeItem(item.id)}
+                                                className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                                                title="Remove Item"
+                                            >
+                                                <Icon name="trash-2" size={16} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                                <button 
+                                    onClick={addItem}
+                                    className="mt-4 flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700"
+                                >
+                                    <Icon name="plus-circle" size={16} /> Add Line Item
+                                </button>
+                                {/* Dev helper: quickly create a long invoice for multi-page testing */}
+                                
+                            </div>
+
+                            <hr className="border-slate-200 dark:border-slate-800" />
+
+                            {/* Totals & Config */}
+                            <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-400">Discount (%)</label>
+                                    <input 
+                                        type="number" 
+                                        name="discountRate" 
+                                        value={invoice.discountRate} 
+                                        onChange={handleMetaChange}
+                                        className="w-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-right dark:text-white"
+                                    />
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-400">Tax Rate (%)</label>
+                                    <input 
+                                        type="number" 
+                                        name="taxRate" 
+                                        value={invoice.taxRate} 
+                                        onChange={handleMetaChange}
+                                        className="w-24 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-right dark:text-white"
+                                    />
+                                </div>
+                            </div>
+                            
+                            {/* Payment Methods Editor */}
+                            <div className="bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl space-y-3">
+                                <h3 className="font-semibold text-slate-900 dark:text-white">Payment Methods</h3>
+                                <div className="grid grid-cols-1 gap-2">
+                                    <div>
+                                        <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Bank Name</label>
+                                        <input
+                                            type="text"
+                                            name="bankName"
+                                            value={invoice.paymentMethods.bankName}
+                                            onChange={handlePaymentChange}
+                                            className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm dark:text-white outline-none focus:ring-1 focus:ring-blue-400"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">Account Number</label>
+                                        <input
+                                            type="text"
+                                            name="accountNumber"
+                                            value={invoice.paymentMethods.accountNumber}
+                                            onChange={handlePaymentChange}
+                                            className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm dark:text-white outline-none focus:ring-1 focus:ring-blue-400"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">PayPal Email</label>
+                                        <input
+                                            type="email"
+                                            name="paypalEmail"
+                                            value={invoice.paymentMethods.paypalEmail}
+                                            onChange={handlePaymentChange}
+                                            className="w-full bg-transparent border border-slate-200 dark:border-slate-700 rounded-md px-3 py-2 text-sm dark:text-white outline-none focus:ring-1 focus:ring-blue-400"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* Action Buttons */}
+                            <div className="pt-4 sticky bottom-0 bg-white dark:bg-slate-900 pb-4 border-t border-slate-100 dark:border-slate-800">
+                                <button 
+                                    onClick={generatePDF}
+                                    disabled={isGenerating}
+                                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+                                >
+                                    {isGenerating ? (
+                                        <>
+                                            <Icon name="loader-2" className="animate-spin" size={20} /> Generating PDF...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Icon name="download" size={20} /> Download Invoice
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    {/* RIGHT PANEL: Preview */}
+                    <div className="w-full md:w-1/2 lg:w-7/12 bg-slate-100 dark:bg-[#0B1120] p-4 md:p-8 lg:p-12 overflow-y-auto h-screen-dynamic">
+                        <div className="text-center mb-6 text-slate-500 dark:text-slate-400 text-sm">
+                            <Icon name="eye" size={16} className="inline mr-1 relative -top-0.5" /> Live Preview
+                        </div>
+
+                        {/* Invoice Paper */}
+                        <div 
+                            id="invoice-preview" 
+                            className="invoice-paper w-full max-w-[8.5in] min-h-[11in] p-8 md:p-12 relative text-sm"
+                        >
+                            {/* ...existing code... */}
+
+                            {/* Header (spaced down to make room for logo) */}
+                            <div className="flex justify-between items-start mb-8">
+                                <div>
+                                    <h1 className="text-3xl font-bold text-slate-900 mb-2">{invoice.sender.name || 'ShopFusion pvt.ltd'}</h1>
+                                    <p className="text-slate-500 font-medium">{invoice.sender.address}</p>
+                                    <p className="text-slate-500 font-medium">{invoice.sender.email} {invoice.sender.phone ? `| ${invoice.sender.phone}` : ''}</p>
+                                </div>
+                                <div className="text-right">
+                                    <h2 className="font-bold text-xl text-slate-800 mb-1">INVOICE</h2>
+                                    <p className="text-slate-500 font-medium">#{invoice.invoiceNumber}</p>
+                                </div>
+                            </div>
+
+                            {/* Client & Dates */}
+                            <div className="flex justify-between mb-12">
+                                <div>
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Bill To</h3>
+                                    <div className="text-slate-800 font-semibold text-lg">{invoice.recipient.name || 'Client Name'}</div>
+                                    <div className="text-slate-500 text-sm mt-1">
+                                        <p>{invoice.recipient.address}</p>
+                                        <p>{invoice.recipient.email}</p>
+                                        <p>{invoice.recipient.phone}</p>
+                                    </div>
+                                </div>
+                                <div className="text-right space-y-2">
+                                    <div>
+                                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Date Issued</h3>
+                                        <p className="text-slate-800 font-medium">{invoice.date}</p>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Due Date</h3>
+                                        <p className="text-slate-800 font-medium">{invoice.dueDate}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Table */}
+                            <table className="w-full mb-8">
+                                <thead>
+                                    <tr className="border-b-2 border-slate-100">
+                                        <th className="text-left py-3 text-xs font-bold uppercase tracking-wider text-slate-500">Description</th>
+                                        <th className="text-center py-3 text-xs font-bold uppercase tracking-wider text-slate-500 w-16">Qty</th>
+                                        <th className="text-right py-3 text-xs font-bold uppercase tracking-wider text-slate-500 w-24">Price</th>
+                                        <th className="text-right py-3 text-xs font-bold uppercase tracking-wider text-slate-500 w-24">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="text-slate-600">
+                                    {invoice.items.map((item) => (
+                                        <tr key={item.id} className="border-b border-slate-50">
+                                            <td className="py-3 font-medium text-slate-800">{item.description || 'Item description'}</td>
+                                            <td className="py-3 text-center">{item.quantity}</td>
+                                            <td className="py-3 text-right">{invoice.currency}{item.price.toFixed(2)}</td>
+                                            <td className="py-3 text-right font-medium text-slate-800">
+                                                {/* Calculation updates live when quantity or price state changes */}
+                                                {invoice.currency}{(item.quantity * item.price).toFixed(2)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {invoice.items.length === 0 && (
+                                        <tr>
+                                            <td colSpan="4" className="py-8 text-center text-slate-400 italic">No items added yet.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+
+                            {/* Summary */}
+                            <div className="flex justify-end">
+                                <div className="w-64 space-y-3">
+                                    <div className="flex justify-between text-slate-500">
+                                        <span>Subtotal</span>
+                                        <span className="font-medium text-slate-800">{invoice.currency}{subtotal.toFixed(2)}</span>
+                                    </div>
+                                    
+                                    {invoice.discountRate > 0 && (
+                                        <div className="flex justify-between text-green-600">
+                                            <span>Discount ({invoice.discountRate}%)</span>
+                                            <span className="font-medium">-{invoice.currency}{discountAmount.toFixed(2)}</span>
+                                        </div>
+                                    )}
+                                    
+                                    <div className="flex justify-between text-slate-500">
+                                        <span>Tax ({invoice.taxRate}%)</span>
+                                        <span className="font-medium text-slate-800">+{invoice.currency}{taxAmount.toFixed(2)}</span>
+                                    </div>
+                                    
+                                    <div className="border-t-2 border-slate-900 pt-3 flex justify-between items-end">
+                                        <span className="font-bold text-slate-900 text-lg">Total</span>
+                                        <span className="font-bold text-slate-900 text-2xl">{invoice.currency}{total.toFixed(2)}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Footer */}
+                            {/* Payment methods (bottom-left) */}
+                            <div className="absolute left-12 bottom-28 text-sm w-64 p-3 rounded-md text-slate-900 shadow-sm">
+                                <h4 className="font-bold uppercase tracking-wide text-xs mb-2">Payment Methods</h4>
+                                <div className="text-sm text-slate-700">
+                                    <div><span className="font-semibold">Bank Details:</span> {invoice.paymentMethods.bankName || 'Your Bank Name'}</div>
+                                    <div><span className="font-semibold">Account Number:</span> {invoice.paymentMethods.accountNumber || '000123456789'}</div>
+                                    <div><span className="font-semibold">Paypal:</span> {invoice.paymentMethods.paypalEmail || 'yourpaypal@paypal.com'}</div>
+                                </div>
+                            </div>
+
+                            <div className="absolute bottom-12 left-12 right-12 border-t border-slate-100 pt-8 text-center">
+                                <p className="text-slate-400 text-xs mb-2">Payment is due within 30 days.</p>
+                                <p className="text-slate-900 font-medium text-sm">Thank you for your business!</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
